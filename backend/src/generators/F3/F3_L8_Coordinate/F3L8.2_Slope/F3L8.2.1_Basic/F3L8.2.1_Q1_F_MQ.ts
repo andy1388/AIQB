@@ -1,5 +1,6 @@
 import { QuestionGenerator, IGeneratorOutput } from '@/generators/QuestionGenerator';
-import { getRandomInt, gcd } from '@/utils/mathUtils';
+import { getRandomInt, getRandomDecimal, gcd } from '@/utils/mathUtils';
+import { FractionUtils } from '@/utils/FractionUtils';
 
 interface Point {
     x: number;
@@ -9,7 +10,7 @@ interface Point {
 interface SlopeQuestion {
     pointA: Point;
     pointB: Point;
-    slope: string; // 可能是分数或"不存在"
+    slope: string;
 }
 
 export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
@@ -28,59 +29,42 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
             correctAnswer: question.slope,
             wrongAnswers,
             explanation,
-            type: 'text'
-        };
-    }
-
-    private firstPoint: Point | null = null;
-
-    private generateQuestion(): SlopeQuestion {
-        let pointA: Point, pointB: Point, slope: string;
-        this.firstPoint = null;
-        
-        do {
-            pointA = this.generatePoint();
-            this.firstPoint = pointA;
-            pointB = this.generatePoint();
-            slope = this.calculateSlope(pointA, pointB);
-        } while (!this.isValidSlope(slope));
-
-        this.firstPoint = null;
-        return {
-            pointA,
-            pointB,
-            slope
+            type: 'text',
+            displayOptions: {
+                latex: true
+            }
         };
     }
 
     private generatePoint(): Point {
         let x: number, y: number;
         const range = this.getCoordinateRange();
+        const decimals = this.getDecimalPlaces();
 
         switch (this.difficulty) {
-            case 1:
+            case 1: // 正整数
                 x = getRandomInt(0, range);
                 y = getRandomInt(0, range);
                 break;
-            case 2:
+            case 2: // 可以包含负整数
                 x = getRandomInt(-range, range);
                 y = getRandomInt(-range, range);
                 break;
-            case 3:
-                const firstPoint = this.firstPoint;
-                if (Math.random() < 0.33) {
-                    // 垂直线
-                    x = firstPoint ? firstPoint.x : getRandomInt(-range, range);
-                    y = getRandomInt(-range, range);
-                } else if (Math.random() < 0.5) {
-                    // 水平线
-                    x = getRandomInt(-range, range);
-                    y = firstPoint ? firstPoint.y : getRandomInt(-range, range);
-                } else {
-                    // 对角线（斜率为±1）
-                    x = getRandomInt(-range, range);
-                    y = firstPoint ? firstPoint.y + (x - firstPoint.x) : x;
-                }
+            case 3: // 整数
+                x = getRandomInt(-range, range);
+                y = getRandomInt(-range, range);
+                break;
+            case 4: // 一位小数
+                x = getRandomDecimal(-range, range, 1);
+                y = getRandomDecimal(-range, range, 1);
+                break;
+            case 5: // 两位小数
+                x = getRandomDecimal(-range, range, 2);
+                y = getRandomDecimal(-range, range, 2);
+                break;
+            case 6: // 特殊情况
+                x = getRandomInt(-range, range);
+                y = getRandomInt(-range, range);
                 break;
             default:
                 x = getRandomInt(-range, range);
@@ -92,11 +76,65 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
 
     private getCoordinateRange(): number {
         switch (this.difficulty) {
-            case 1: return 5;
-            case 2: return 6;
-            case 3: return 5;
+            case 1: return 5;  // 小范围正整数
+            case 2: return 5;  // 包含负数
+            case 3: return 6;  // 较大范围整数
+            case 4: return 5;  // 一位小数
+            case 5: return 5;  // 两位小数
+            case 6: return 5;  // 特殊情况
             default: return 5;
         }
+    }
+
+    private getDecimalPlaces(): number {
+        switch (this.difficulty) {
+            case 1:
+            case 2:
+            case 3:
+            case 6:
+                return 0;
+            case 4:
+                return 1;
+            case 5:
+                return 2;
+            default:
+                return 0;
+        }
+    }
+
+    private generateQuestion(): SlopeQuestion {
+        let pointA: Point, pointB: Point, slope: string;
+        
+        do {
+            if (this.difficulty === 6) {
+                // 特殊情况：垂直线、水平线、对角线
+                const type = Math.random();
+                if (type < 0.33) {
+                    // 垂直线
+                    pointA = this.generatePoint();
+                    pointB = { x: pointA.x, y: pointA.y + getRandomInt(1, 5) };
+                } else if (type < 0.66) {
+                    // 水平线
+                    pointA = this.generatePoint();
+                    pointB = { x: pointA.x + getRandomInt(1, 5), y: pointA.y };
+                } else {
+                    // 对角线（斜率为±1）
+                    pointA = this.generatePoint();
+                    const step = getRandomInt(1, 5);
+                    pointB = { 
+                        x: pointA.x + step,
+                        y: Math.random() < 0.5 ? pointA.y + step : pointA.y - step
+                    };
+                }
+            } else {
+                pointA = this.generatePoint();
+                pointB = this.generatePoint();
+            }
+            
+            slope = this.calculateSlope(pointA, pointB);
+        } while (!this.isValidSlope(slope));
+
+        return { pointA, pointB, slope };
     }
 
     private calculateSlope(pointA: Point, pointB: Point): string {
@@ -110,67 +148,82 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
         
         // 处理水平线
         if (dy === 0) {
-            return "0";
+            return "$0$";
         }
 
-        // 确保分母为正
-        let num = dy;
-        let den = dx;
-        if (den < 0) {
-            num = -num;
-            den = -den;
-        }
-        
-        // 约分
-        const divisor = gcd(Math.abs(num), Math.abs(den));
-        num = num / divisor;
-        den = den / divisor;
+        // 使用FractionUtils来约分和格式化分数
+        const [num, den] = FractionUtils.simplify(dy, dx);
         
         // 如果分母为1，返回整数
         if (den === 1) {
-            return num.toString();
+            return `$${num}$`;
         }
         
-        return `\\frac{${num}}{${den}}`;
+        // 返回LaTeX分数格式
+        return `$${FractionUtils.toLatex(num, den)}$`;
+    }
+
+    private formatFraction(num: number, den: number): string {
+        // 使用FractionUtils来约分和格式化分数
+        const [simplifiedNum, simplifiedDen] = FractionUtils.simplify(num, den);
+        
+        // 如果分母为1，返回整数
+        if (simplifiedDen === 1) {
+            return `$${simplifiedNum}$`;
+        }
+        
+        // 返回LaTeX分数格式
+        return `$${FractionUtils.toLatex(simplifiedNum, simplifiedDen)}$`;
     }
 
     private isValidSlope(slope: string): boolean {
         if (slope === "不存在") {
-            return this.difficulty === 3;
+            return this.difficulty === 6;
         }
 
-        if (slope === "0") {
-            return this.difficulty === 3;
+        // 移除$符号并获取纯数值
+        const cleanSlope = slope.replace(/\$/g, '');
+
+        if (cleanSlope === "0") {
+            return this.difficulty === 6;
         }
 
         let value: number;
-        if (slope.includes('\\frac{')) {
-            const matches = slope.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
+        if (cleanSlope.includes('\\frac{')) {
+            const matches = cleanSlope.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
             if (matches) {
                 const [_, num, den] = matches;
                 value = parseInt(num) / parseInt(den);
             } else {
-                value = parseFloat(slope);
+                value = parseFloat(cleanSlope);
             }
         } else {
-            value = parseFloat(slope);
+            value = parseFloat(cleanSlope);
         }
 
         switch (this.difficulty) {
             case 1:
-                return Number.isInteger(value) && value > 0 && value <= 5;
+                return Number.isInteger(value) && value > 0;
             case 2:
-                return Number.isInteger(value) && Math.abs(value) <= 5;
+                return Number.isInteger(value);
             case 3:
-                return Math.abs(value) === 1;
+            case 4:
+            case 5:
+                return true; // 允许分数
+            case 6:
+                return Math.abs(value) === 1; // 对角线
             default:
                 return true;
         }
     }
 
+    private formatPoint(point: Point): string {
+        const decimals = this.getDecimalPlaces();
+        return `(${point.x.toFixed(decimals)}, ${point.y.toFixed(decimals)})`;
+    }
+
     private formatQuestion(question: SlopeQuestion): string {
-        const formatPoint = (p: Point) => `(${p.x}, ${p.y})`;
-        return `求以下兩點所形成直線的斜率：\\[A${formatPoint(question.pointA)}, B${formatPoint(question.pointB)}\\]`;
+        return `求以下兩點所形成直線的斜率：\\[A${this.formatPoint(question.pointA)}, B${this.formatPoint(question.pointB)}\\]`;
     }
 
     private generateWrongAnswers(question: SlopeQuestion): string[] {
@@ -179,48 +232,102 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
         const dx = pointB.x - pointA.x;
         const dy = pointB.y - pointA.y;
 
+        // 辅助函数：获取答案的数值
+        const getNumericValue = (ans: string): number | null => {
+            if (ans === "不存在") return null;
+            const cleanAns = ans.replace(/\$/g, '');
+            if (cleanAns.includes('\\frac{')) {
+                const matches = cleanAns.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
+                if (matches) {
+                    const [_, num, den] = matches;
+                    return parseInt(num) / parseInt(den);
+                }
+            }
+            return parseFloat(cleanAns);
+        };
+
+        // 辅助函数：检查答案是否已存在（数值上相等）
+        const isAnswerExists = (newAns: string): boolean => {
+            const newValue = getNumericValue(newAns);
+            if (newValue === null) return false;
+            
+            // 检查是否与正确答案相等
+            const correctValue = getNumericValue(question.slope);
+            if (correctValue === newValue) return true;
+
+            // 检查是否与已有的错误答案相等
+            for (const existingAns of wrongAnswers) {
+                const existingValue = getNumericValue(existingAns);
+                if (existingValue === newValue) return true;
+            }
+            return false;
+        };
+
         try {
-            // 错误类型1：分子分母顛倒
+            // 1. 分子分母顛倒
             if (dy !== 0) {
-                const wrong1 = this.calculateSlope(
-                    { x: 0, y: 0 },
-                    { x: dy, y: dx }
-                );
-                wrongAnswers.add(wrong1);
+                const wrong1 = this.formatFraction(dx, dy);
+                if (!isAnswerExists(wrong1)) {
+                    wrongAnswers.add(wrong1);
+                }
             }
 
-            // 错误类型2：y坐标相减顺序错误
-            const wrong2 = this.calculateSlope(
-                { x: pointA.x, y: pointB.y },
-                { x: pointB.x, y: pointA.y }
-            );
-            wrongAnswers.add(wrong2);
+            // 2. y坐标相减顺序错误
+            const wrong2 = this.formatFraction(pointA.y - pointB.y, pointB.x - pointA.x);
+            if (!isAnswerExists(wrong2)) {
+                wrongAnswers.add(wrong2);
+            }
 
-            // 错误类型3：x坐标相减顺序错误
+            // 3. x坐标相减顺序错误
             if (dx !== 0) {
-                const wrong3 = this.calculateSlope(
-                    { x: pointB.x, y: pointA.y },
-                    { x: pointA.x, y: pointB.y }
-                );
-                wrongAnswers.add(wrong3);
+                const wrong3 = this.formatFraction(dy, -dx);
+                if (!isAnswerExists(wrong3)) {
+                    wrongAnswers.add(wrong3);
+                }
             }
 
-            // 错误类型4：忘记负号
+            // 4. 忘记负号
             if (dx !== 0) {
-                const wrong4 = this.calculateSlope(
-                    { x: 0, y: 0 },
-                    { x: Math.abs(dx), y: Math.abs(dy) }
-                );
-                wrongAnswers.add(wrong4);
+                const wrong4 = this.formatFraction(Math.abs(dy), Math.abs(dx));
+                if (!isAnswerExists(wrong4)) {
+                    wrongAnswers.add(wrong4);
+                }
             }
 
-            // 错误类型5：分数未化简（如果是分数答案）
-            if (question.slope.includes('\\frac{')) {
-                const matches = question.slope.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
+            // 5. 分数未化简
+            const cleanSlope = question.slope.replace(/\$/g, '');
+            if (cleanSlope.includes('\\frac{')) {
+                const matches = cleanSlope.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
                 if (matches) {
                     const [_, num, den] = matches;
                     const factor = 2;
-                    wrongAnswers.add(`\\frac{${parseInt(num) * factor}}{${parseInt(den) * factor}}`);
+                    const wrong5 = this.formatFraction(parseInt(num) * factor, parseInt(den) * factor);
+                    if (!isAnswerExists(wrong5)) {
+                        wrongAnswers.add(wrong5);
+                    }
+                }
+            }
+
+            // 6. 斜率倒数
+            if (question.slope !== "不存在" && question.slope !== "$0$") {
+                const cleanSlope = question.slope.replace(/\$/g, '');
+                if (cleanSlope.includes('\\frac{')) {
+                    const matches = cleanSlope.match(/\\frac\{(-?\d+)\}\{(\d+)\}/);
+                    if (matches) {
+                        const [_, num, den] = matches;
+                        const wrong6 = this.formatFraction(parseInt(den), parseInt(num));
+                        if (!isAnswerExists(wrong6)) {
+                            wrongAnswers.add(wrong6);
+                        }
+                    }
+                } else {
+                    const value = parseFloat(cleanSlope);
+                    if (value !== 0) {
+                        const wrong6 = this.formatFraction(1, value);
+                        if (!isAnswerExists(wrong6)) {
+                            wrongAnswers.add(wrong6);
+                        }
+                    }
                 }
             }
 
@@ -228,26 +335,23 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
             console.error('Error generating wrong answer:', error);
         }
 
-        // 移除无效答案
-        wrongAnswers.delete(question.slope);
-        wrongAnswers.delete('undefined');
-        wrongAnswers.delete('NaN');
-        wrongAnswers.delete('Infinity');
-        wrongAnswers.delete('-Infinity');
-
         // 如果还是没有足够的错误答案，添加一些基本的错误答案
-        if (wrongAnswers.size < 3) {
-            if (question.slope === "不存在") {
-                wrongAnswers.add("0");
-                wrongAnswers.add("1");
-                wrongAnswers.add("-1");
-            } else {
-                wrongAnswers.add("不存在");
-                if (!question.slope.includes('\\frac{')) {
-                    const value = parseInt(question.slope);
-                    wrongAnswers.add((value + 1).toString());
-                    wrongAnswers.add((value - 1).toString());
-                }
+        const basicWrongAnswers = [
+            "不存在",
+            "$0$",
+            this.formatFraction(2, 1),
+            this.formatFraction(-2, 1),
+            this.formatFraction(1, 2),
+            this.formatFraction(-1, 2),
+            this.formatFraction(-1, 1),
+            this.formatFraction(3, 1),
+            this.formatFraction(-3, 1)
+        ];
+
+        for (const ans of basicWrongAnswers) {
+            if (wrongAnswers.size >= 3) break;
+            if (!isAnswerExists(ans)) {
+                wrongAnswers.add(ans);
             }
         }
 
@@ -259,17 +363,12 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
         const dx = pointB.x - pointA.x;
         const dy = pointB.y - pointA.y;
 
-        // 处理坐标值的显示，负数加括号
-        const formatNumber = (num: number): string => {
-            return num < 0 ? `(${num})` : num.toString();
-        };
-
         let explanation = `解題步驟：
 \\[1.\\space 使用斜率公式：m = \\frac{y_2-y_1}{x_2-x_1}\\]
 
 \\[2.\\space 代入座標：\\]
-\\[x_2-x_1 = ${formatNumber(pointB.x)}-${formatNumber(pointA.x)} = ${formatNumber(dx)}\\]
-\\[y_2-y_1 = ${formatNumber(pointB.y)}-${formatNumber(pointA.y)} = ${formatNumber(dy)}\\]`;
+\\[x_2-x_1 = ${pointB.x.toFixed(this.getDecimalPlaces())} - ${pointA.x.toFixed(this.getDecimalPlaces())} = ${dx.toFixed(this.getDecimalPlaces())}\\]
+\\[y_2-y_1 = ${pointB.y.toFixed(this.getDecimalPlaces())} - ${pointA.y.toFixed(this.getDecimalPlaces())} = ${dy.toFixed(this.getDecimalPlaces())}\\]`;
 
         if (dx === 0) {
             explanation += `
@@ -280,7 +379,7 @@ export default class F3L8_2_1_Q1_F_MQ extends QuestionGenerator {
         } else {
             explanation += `
 \\[3.\\space 計算斜率：\\]
-\\[m = \\frac{y_2-y_1}{x_2-x_1} = \\frac{${formatNumber(dy)}}{${formatNumber(dx)}}\\]`;
+\\[m = \\frac{y_2-y_1}{x_2-x_1} = \\frac{${dy.toFixed(this.getDecimalPlaces())}}{${dx.toFixed(this.getDecimalPlaces())}}\\]`;
 
             if (question.slope.includes('\\frac{')) {
                 explanation += `
