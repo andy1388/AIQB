@@ -650,134 +650,91 @@ export const ExpressionAnalyzer = {
 
             console.log('Processing expression:', expr);
 
-            // 首先處理 LaTeX 格式
-            let processedExpr = expr;
+            // 將 LaTeX 轉換為 nerdamer 可處理的格式
+            let processedExpr = this._latexToNerdamer(expr);
 
-            // 處理分數
-            processedExpr = processedExpr.replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, (_, num, den) => {
-                return `(${num}/${den})`;
-            });
-
-            // 處理根號
-            processedExpr = processedExpr.replace(/\\sqrt\{([^{}]+)\}/g, (_, content) => {
-                return this._standardizeRoot(content);
-            });
-
-            // 處理三角函數
-            const trigFunctions = ['sin', 'cos', 'tan', 'csc', 'sec', 'cot'];
-            trigFunctions.forEach(func => {
-                const pattern = new RegExp(`\\\\${func}\\{([^{}]+)\\}`, 'g');
-                processedExpr = processedExpr.replace(pattern, (_, content) => {
-                    return this._standardizeFunction(`\\${func}{${content}}`);
-                });
-            });
-
-            // 處理對數函數
-            processedExpr = processedExpr.replace(/\\log\{([^{}]+)\}/g, (_, content) => {
-                return this._standardizeFunction(`\\log{${content}}`);
-            });
-            processedExpr = processedExpr.replace(/\\ln\{([^{}]+)\}/g, (_, content) => {
-                return this._standardizeFunction(`\\ln{${content}}`);
-            });
-
-            // 分割各項
-            const terms = processedExpr.split(/(?=[+-])/).filter(term => term.trim());
-            
-            // 按變量分組
-            const termGroups = new Map<string, string[]>();
-            
-            // 分類各項
-            terms.forEach(term => {
-                // 移除開頭的加號
-                term = term.trim().replace(/^\+/, '');
+            try {
+                // 使用 nerdamer 化簡表達式
+                const simplified = nerdamer(processedExpr)
+                    .expand()
+                    .simplify();
                 
-                // 提取變量部分（包括函數和多個變量）
-                let variable = '';
-                if (term.includes('\\')) {
-                    // 如果包含 LaTeX 命令，保留完整的函數形式
-                    const funcMatch = term.match(/\\[a-zA-Z]+\{[^{}]+\}/);
-                    if (funcMatch) {
-                        variable = funcMatch[0];
-                    }
-                } else {
-                    // 處理一般變量，包括多個變量的情況
-                    const variableMatch = term.match(/[a-zA-Z]+/g);
-                    if (variableMatch) {
-                        // 對變量進行排序以確保一致性（如 ab 和 ba 視為相同）
-                        variable = variableMatch.sort().join('');
-                    }
-                }
-                
-                // 將項加入對應的組
-                if (!termGroups.has(variable)) {
-                    termGroups.set(variable, []);
-                }
-                termGroups.get(variable)?.push(term);
-            });
+                // 將結果轉回 LaTeX 格式
+                let result = this._nerdamerToLatex(simplified.text());
 
-            // 處理每組同類項
-            const combinedTerms: string[] = [];
-            
-            for (const [variable, groupTerms] of termGroups) {
-                if (groupTerms.length > 0) {
-                    // 提取係數進行運算
-                    const coefficients = groupTerms.map(term => {
-                        // 處理括號中的分數
-                        if (term.includes('(') && term.includes('/')) {
-                            const fractionMatch = term.match(/\((-?\d+)\/(\d+)\)/);
-                            if (fractionMatch) {
-                                const [_, num, den] = fractionMatch;
-                                return `${num}/${den}`;
-                            }
-                        }
-                        // 處理一般係數，包括負號的情況
-                        const coefMatch = term.match(/^([+-]?\d*\.?\d*)/);
-                        if (!coefMatch || coefMatch[1] === '' || coefMatch[1] === '+') return '1';
-                        if (coefMatch[1] === '-') return '-1';
-                        return coefMatch[1];
-                    }).join('+');
-
-                    // 使用 NumberCalculator 計算係數和
-                    const combinedCoef = NumberCalculator.calculate(coefficients);
-                    
-                    // 如果係數不為0，則加入結果
-                    if (combinedCoef !== '0') {
-                        if (variable) {
-                            // 處理變量項
-                            if (combinedCoef === '1') {
-                                combinedTerms.push(variable);
-                            } else if (combinedCoef === '-1') {
-                                combinedTerms.push(`-${variable}`);
-                            } else {
-                                combinedTerms.push(`${combinedCoef}${variable}`);
-                            }
-                        } else {
-                            // 處理純數字項
-                            combinedTerms.push(combinedCoef);
-                        }
-                    }
+                // 如果結果為空，返回0
+                if (!result) {
+                    result = '0';
                 }
+
+                console.log('Combined result:', result);
+                return equals ? `${result}=${equals}` : result;
+
+            } catch (nerdamerError) {
+                console.error('Nerdamer processing error:', nerdamerError);
+                return expr; // 如果處理失敗，返回原表達式
             }
 
-            // 組合最終結果
-            let result = combinedTerms.join('+')
-                // 修正正負號
-                .replace(/\+-/g, '-')
-                // 移除開頭的加號
-                .replace(/^\+/, '');
-            
-            // 如果結果為空，返回0
-            if (!result) {
-                result = '0';
-            }
-
-            console.log('Combined result:', result);
-
-            return equals ? `${result}=${equals}` : result;
         } catch (error) {
             console.error('Combine terms error:', error);
             throw error;
         }
+    },
+
+    /**
+     * 將 LaTeX 格式轉換為 nerdamer 可處理的格式
+     */
+    _latexToNerdamer(latex: string): string {
+        return latex
+            // 處理分數
+            .replace(/\\frac\{(-?\d+)\}\{(\d+)\}/g, '($1/$2)')
+            // 處理乘號
+            .replace(/\\times/g, '*')
+            .replace(/\\cdot/g, '*')
+            // 處理除號
+            .replace(/\\div/g, '/')
+            // 處理指數
+            .replace(/\^(\d+)/g, '^($1)')
+            // 處理根號
+            .replace(/\\sqrt\{([^{}]+)\}/g, 'sqrt($1)')
+            // 處理括號
+            .replace(/\\left\(/g, '(')
+            .replace(/\\right\)/g, ')')
+            // 處理變量
+            .replace(/([a-zA-Z])([a-zA-Z])/g, '$1*$2')
+            // 移除多餘的空格
+            .replace(/\s+/g, '')
+            // 處理連續的運算符
+            .replace(/([+\-*\/])\s*([+\-*\/])/g, '$1$2');
+    },
+
+    /**
+     * 將 nerdamer 結果轉換回 LaTeX 格式
+     */
+    _nerdamerToLatex(result: string): string {
+        return result
+            // 處理分數
+            .replace(/\((-?\d+)\/(\d+)\)/g, '\\frac{$1}{$2}')
+            // 處理乘號
+            .replace(/\*/g, '\\times')
+            // 處理除號
+            .replace(/\//g, '\\div')
+            // 處理指數
+            .replace(/\^(\d+)/g, '^{$1}')
+            // 處理根號
+            .replace(/sqrt\(([^()]+)\)/g, '\\sqrt{$1}')
+            // 處理括號
+            .replace(/\(/g, '\\left(')
+            .replace(/\)/g, '\\right)')
+            // 處理正號（移除開頭的正號）
+            .replace(/^\+/, '')
+            // 處理連續的運算符
+            .replace(/([+-])\s*([+-])/g, (_, op1, op2) => 
+                op1 === op2 ? '+' : '-'
+            )
+            // 美化空格
+            .replace(/([+\-])/g, ' $1 ')
+            .trim();
     },
 
     /**
